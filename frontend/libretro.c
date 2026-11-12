@@ -1461,6 +1461,9 @@ static struct disks_state
    int internal_index; // for multidisk eboots
 } disks[8];
 
+/* info->path of the running game, kept for per-game BIOS lookup */
+static char game_image_path[PATH_MAX];
+
 static void get_disk_label(char *disk_label, const char *disk_path, size_t len)
 {
    const char *base = NULL;
@@ -1541,6 +1544,102 @@ static unsigned int disk_get_image_index(void)
    return disk_current_index;
 }
 
+/* Look for <image name>.bios next to the image. Dumps in the wild have
+   the extension in every case combination, so try them all. */
+static bool find_per_game_bios(const char *image)
+{
+   char path[PATH_MAX];
+   const char *base, *dot;
+   size_t base_len;
+   unsigned int mask;
+   FILE *fp;
+
+   if (image == NULL || image[0] == '\0')
+      return false;
+
+   {
+      const char *slash = strrchr(image, '/');
+      const char *backslash = strrchr(image, '\\');
+
+      /* mixed separators do show up in playlists, take the last one */
+      if (slash && backslash)
+         base = slash > backslash ? slash : backslash;
+      else
+         base = slash ? slash : backslash;
+      base = base ? base + 1 : image;
+   }
+
+   dot = strrchr(base, '.');
+   if (dot == NULL || dot == base)
+      return false;
+
+   base_len = (size_t)(dot - image);
+   /* PATH_MAX is roomy, Config.GameBiosPath is not: a truncated path here
+      would fail later in psxMemReset() and look like a broken override */
+   if (base_len + 6 > sizeof(path) ||
+       base_len + 6 > sizeof(Config.GameBiosPath)) {
+      SysPrintf("per-game BIOS path too long: %s\n", image);
+      return false;
+   }
+
+   memcpy(path, image, base_len);
+   memcpy(path + base_len, ".bios", 6);
+
+   for (mask = 0; mask < 16; mask++)
+   {
+      path[base_len + 1] = (mask & 1) ? 'B' : 'b';
+      path[base_len + 2] = (mask & 2) ? 'I' : 'i';
+      path[base_len + 3] = (mask & 4) ? 'O' : 'o';
+      path[base_len + 4] = (mask & 8) ? 'S' : 's';
+
+      fp = fopen(path, "rb");
+      if (fp != NULL)
+      {
+         fclose(fp);
+         snprintf(Config.GameBiosPath, sizeof(Config.GameBiosPath), "%s", path);
+         return true;
+      }
+   }
+
+   return false;
+}
+
+/* m3u/image name first, then the current disc, then the first one.
+   Called on load and on disc switch; an ejected disc keeps the current
+   BIOS, a new path only kicks in on reset. */
+static void update_per_game_bios(void)
+{
+   const char *candidates[3];
+   int count = 0, i, j;
+
+   Config.GameBiosPath[0] = '\0';
+
+   if (game_image_path[0])
+      candidates[count++] = game_image_path;
+   if (disk_current_index < disk_count)
+      candidates[count++] = disks[disk_current_index].fname;
+   if (disk_count > 0)
+      candidates[count++] = disks[0].fname;
+
+   for (i = 0; i < count; i++)
+   {
+      if (candidates[i] == NULL)
+         continue;
+
+      for (j = 0; j < i; j++)
+         if (candidates[j] != NULL && strcmp(candidates[j], candidates[i]) == 0)
+            break;
+      if (j < i)
+         continue;
+
+      if (find_per_game_bios(candidates[i]))
+      {
+         SysPrintf("Using per-game BIOS: %s\n", Config.GameBiosPath);
+         return;
+      }
+   }
+}
+
 static bool disk_set_image_index(unsigned int index)
 {
    if (index > disk_count)
@@ -1582,6 +1681,7 @@ static bool disk_set_image_index(unsigned int index)
    }
 
    disk_current_index = index;
+   update_per_game_bios();
    return true;
 }
 
@@ -2044,6 +2144,8 @@ bool retro_load_game(const struct retro_game_info *info)
    is_m3u = (strcasestr(info->path, ".m3u") != NULL);
    is_exe = (strcasestr(info->path, ".exe") != NULL);
 
+   snprintf(game_image_path, sizeof(game_image_path), "%s", info->path);
+
    update_variables(false);
 
    if (plugins_opened)
@@ -2203,6 +2305,9 @@ bool retro_load_game(const struct retro_game_info *info)
 
    /* Init embedded cheat database for this game */
    cheat_db_init(CdromId);
+
+   /* per-game BIOS: <image or m3u name>.bios, then the disc names */
+   update_per_game_bios();
 
    load_memcards();
    plugin_call_rearmed_cbs();
