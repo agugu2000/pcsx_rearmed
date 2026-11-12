@@ -1,0 +1,374 @@
+name: Build
+
+# Manual only: press "Run workflow" in the Actions tab, then grab the
+# per-platform artifacts from the run. Each artifact is a single zip that
+# holds exactly one core (named as its platform expects, e.g.
+# pcsx_rearmed_libretro_android.so) so nothing has to be built locally.
+# The nightly release re-zips the same cores 1:1 -- no zip ever contains
+# another zip.
+on:
+  workflow_dispatch:
+    inputs:
+      make_release:
+        description: "Also publish these artifacts as a nightly release"
+        type: boolean
+        default: false
+
+jobs:
+  build-android:
+    name: Android ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: aarch64-neon
+            abi: arm64-v8a
+            gpu: neon
+            gpu_type: auto
+
+          - name: arm-neon
+            abi: armeabi-v7a
+            gpu: neon
+            gpu_type: auto
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
+
+      - name: Install dependencies
+        run: |
+          command -v python3 >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y python3; }
+
+      - name: Generate cheat database
+        run: python3 tools/gen_cheat_db.py deps/cheat_bilingual.json frontend/cheat_db.c
+
+      - name: Build
+        run: |
+          ${{ steps.setup-ndk.outputs.ndk-path }}/ndk-build \
+            -j$(nproc) \
+            --no-print-directory \
+            -C jni/ \
+            APP_ABI=${{ matrix.abi }} \
+            GPU_TYPE=${{ matrix.gpu_type }}
+
+      - name: Package
+        run: |
+          # RetroArch on Android only picks up cores named *_libretro_android.so
+          # (this is what the libretro buildbot ships too).
+          mv libs/${{ matrix.abi }}/libretro.so pcsx_rearmed_libretro_android.so
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ matrix.name }}
+          path: pcsx_rearmed_libretro_android.so
+
+  build-linux-arm:
+    name: Linux ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: arm64-neon
+            arch: arm64
+            platform: CortexA73_G12B
+            gpu: neon
+            extra_args: ""
+
+          - name: arm64-unai
+            arch: arm64
+            platform: CortexA73_G12B
+            gpu: unai
+            extra_args: "BUILTIN_GPU=unai"
+
+          - name: arm64-peops
+            arch: arm64
+            platform: CortexA73_G12B
+            gpu: peops
+            extra_args: "BUILTIN_GPU=peops"
+
+          - name: arm64-rk3326-neon
+            arch: arm64
+            platform: rk3326
+            gpu: neon
+            extra_args: ""
+
+          - name: arm64-rk3326-unai
+            arch: arm64
+            platform: rk3326
+            gpu: unai
+            extra_args: "BUILTIN_GPU=unai"
+
+          - name: arm64-rk3326-peops
+            arch: arm64
+            platform: rk3326
+            gpu: peops
+            extra_args: "BUILTIN_GPU=peops"
+
+          - name: arm64-rk3562-neon
+            arch: arm64
+            platform: rk3562
+            gpu: neon
+            extra_args: ""
+
+          - name: arm64-rk3562-unai
+            arch: arm64
+            platform: rk3562
+            gpu: unai
+            extra_args: "BUILTIN_GPU=unai"
+
+          - name: arm64-rk3562-peops
+            arch: arm64
+            platform: rk3562
+            gpu: peops
+            extra_args: "BUILTIN_GPU=peops"
+
+          - name: arm32-neon
+            arch: arm32
+            platform: armv7-neon,hardfloat
+            gpu: neon
+            extra_args: ""
+
+          - name: arm32-unai
+            arch: arm32
+            platform: rpi1
+            gpu: unai
+            extra_args: "BUILTIN_GPU=unai"
+
+          - name: arm32-peops
+            arch: arm32
+            platform: rpi1
+            gpu: peops
+            extra_args: "BUILTIN_GPU=peops"
+
+          - name: arm32-rk3326-neon
+            arch: arm32
+            platform: classic_armv8_a35
+            gpu: neon
+            extra_args: ""
+
+          - name: arm32-rk3326-unai
+            arch: arm32
+            platform: classic_armv8_a35
+            gpu: unai
+            extra_args: "BUILTIN_GPU=unai"
+
+          - name: arm32-rk3326-peops
+            arch: arm32
+            platform: classic_armv8_a35
+            gpu: peops
+            extra_args: "BUILTIN_GPU=peops"
+
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y make git bc sed python3
+          apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libc6-dev-armhf-cross
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Build
+        env:
+          # Keep the bare .so; the artifact upload below is the only zip.
+          PACKAGE_ZIP: "0"
+        run: .github/build-libretro-zip.sh ${{ matrix.arch }} ${{ matrix.platform }} ${{ matrix.extra_args }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.name }}
+          path: pcsx_rearmed_libretro.so
+
+  build-windows:
+    name: Windows ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64-neon
+            cc: x86_64-w64-mingw32-gcc
+            cxx: x86_64-w64-mingw32-g++
+            gpu: neon
+            extra_args: ""
+
+          - name: x64-unai
+            cc: x86_64-w64-mingw32-gcc
+            cxx: x86_64-w64-mingw32-g++
+            gpu: unai
+            extra_args: "BUILTIN_GPU=unai"
+
+          - name: x64-peops
+            cc: x86_64-w64-mingw32-gcc
+            cxx: x86_64-w64-mingw32-g++
+            gpu: peops
+            extra_args: "BUILTIN_GPU=peops"
+
+          - name: x86-neon
+            cc: i686-w64-mingw32-gcc
+            cxx: i686-w64-mingw32-g++
+            gpu: neon
+            extra_args: ""
+
+          - name: x86-unai
+            cc: i686-w64-mingw32-gcc
+            cxx: i686-w64-mingw32-g++
+            gpu: unai
+            extra_args: "BUILTIN_GPU=unai"
+
+          - name: x86-peops
+            cc: i686-w64-mingw32-gcc
+            cxx: i686-w64-mingw32-g++
+            gpu: peops
+            extra_args: "BUILTIN_GPU=peops"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Install MinGW and python3
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 \
+                                   gcc-mingw-w64-i686 g++-mingw-w64-i686 python3
+
+      - name: Build
+        run: |
+          make -j$(nproc) -f Makefile.libretro \
+            platform=win \
+            CC=${{ matrix.cc }} \
+            CXX=${{ matrix.cxx }} \
+            ${{ matrix.extra_args }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.name }}
+          path: pcsx_rearmed_libretro.dll
+
+  build-switch:
+    name: Nintendo Switch
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Install dependencies
+        run: |
+          command -v python3 >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y python3; }
+
+      - name: Build
+        run: make -j$(nproc) -f Makefile.libretro platform=libnx
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: switch
+          path: pcsx_rearmed_libretro_libnx.a
+
+  release:
+    needs: [build-android, build-linux-arm, build-windows, build-switch]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.make_release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Repackage
+        # artifacts/ holds the bare cores (download-artifact unpacks them);
+        # zip each one back up 1:1 so every release asset is a single-layer
+        # archive named after its artifact.
+        run: |
+          mkdir -p dist
+          for d in artifacts/*/; do
+            art=$(basename "$d")
+            ( cd "$d" && zip -9 -j "../../dist/pcsx_rearmed_libretro_${art//-/_}.zip" ./* )
+          done
+          ls -l dist
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly-${{ steps.sha.outputs.short }}
+          name: "Nightly ${{ steps.sha.outputs.short }}"
+          body: |
+            ## Nightly Build
+
+            Commit: `${{ github.sha }}`
+
+            Every asset is one zip containing one core -- no nested archives.
+            Core file names match the libretro buildbot convention
+            (`pcsx_rearmed_libretro_android.so` on Android, `.so` on Linux,
+            `.dll` on Windows).
+
+            ### Downloads
+            | File | Platform | GPU |
+            |------|----------|-----|
+            | `pcsx_rearmed_libretro_android_aarch64_neon.zip` | Android arm64-v8a | NEON |
+            | `pcsx_rearmed_libretro_android_arm_neon.zip` | Android armeabi-v7a | NEON |
+            | `pcsx_rearmed_libretro_linux_arm64_neon.zip` | Linux ARM64 (CortexA73_G12B) | NEON |
+            | `pcsx_rearmed_libretro_linux_arm64_unai.zip` | Linux ARM64 (CortexA73_G12B) | UNAI |
+            | `pcsx_rearmed_libretro_linux_arm64_peops.zip` | Linux ARM64 (CortexA73_G12B) | PEOPS |
+            | `pcsx_rearmed_libretro_linux_arm64_rk3326_neon.zip` | Linux ARM64 (A35) | NEON |
+            | `pcsx_rearmed_libretro_linux_arm64_rk3326_unai.zip` | Linux ARM64 (A35) | UNAI |
+            | `pcsx_rearmed_libretro_linux_arm64_rk3326_peops.zip` | Linux ARM64 (A35) | PEOPS |
+            | `pcsx_rearmed_libretro_linux_arm64_rk3562_neon.zip` | Linux ARM64 (A53) | NEON |
+            | `pcsx_rearmed_libretro_linux_arm64_rk3562_unai.zip` | Linux ARM64 (A53) | UNAI |
+            | `pcsx_rearmed_libretro_linux_arm64_rk3562_peops.zip` | Linux ARM64 (A53) | PEOPS |
+            | `pcsx_rearmed_libretro_linux_arm32_neon.zip` | Linux ARM32 (armv7 hardfloat) | NEON |
+            | `pcsx_rearmed_libretro_linux_arm32_unai.zip` | Linux ARM32 (RPi1) | UNAI |
+            | `pcsx_rearmed_libretro_linux_arm32_peops.zip` | Linux ARM32 (RPi1) | PEOPS |
+            | `pcsx_rearmed_libretro_linux_arm32_rk3326_neon.zip` | Linux ARM32 (A35) | NEON |
+            | `pcsx_rearmed_libretro_linux_arm32_rk3326_unai.zip` | Linux ARM32 (A35) | UNAI |
+            | `pcsx_rearmed_libretro_linux_arm32_rk3326_peops.zip` | Linux ARM32 (A35) | PEOPS |
+            | `pcsx_rearmed_libretro_windows_x64_neon.zip` | Windows x64 | NEON |
+            | `pcsx_rearmed_libretro_windows_x64_unai.zip` | Windows x64 | UNAI |
+            | `pcsx_rearmed_libretro_windows_x64_peops.zip` | Windows x64 | PEOPS |
+            | `pcsx_rearmed_libretro_windows_x86_neon.zip` | Windows x86 | NEON |
+            | `pcsx_rearmed_libretro_windows_x86_unai.zip` | Windows x86 | UNAI |
+            | `pcsx_rearmed_libretro_windows_x86_peops.zip` | Windows x86 | PEOPS |
+            | `pcsx_rearmed_libretro_switch.zip` | Nintendo Switch | NEON |
+          files: dist/*.zip
+          make_latest: true
