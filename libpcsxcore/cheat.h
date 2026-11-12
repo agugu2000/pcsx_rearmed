@@ -48,6 +48,9 @@ int AddCheat(const char *descr, char *code);
 void RemoveCheat(int index);
 int EditCheat(int index, const char *descr, char *code);
 
+int MoveCheatsToFront(int first, int count);
+void RemoveCheatsFrom(int first);
+
 #if 0
 extern s8 *prevM;
 extern u32 *SearchResults;

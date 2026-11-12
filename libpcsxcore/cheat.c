@@ -18,6 +18,7 @@
 
 #include <stdio.h>
 #include <assert.h>
+#include <string.h>
 #include "psxcommon.h"
 #include "r3000a.h"
 #include "psxmem.h"
@@ -57,6 +58,50 @@ void ClearAllCheats() {
 	CheatCodes = NULL;
 	NumCodes = 0;
 	NumCodesAllocated = 0;
+}
+
+// move [first, first+count) to the head of the list. The code indices are
+// absolute, so only the Cheat records move. Returns 0 on success; a failure
+// leaves the list untouched, the caller has to cope with the old layout.
+int MoveCheatsToFront(int first, int count) {
+	Cheat *tmp;
+
+	if (first <= 0 || count <= 0 || first + count > NumCheats)
+		return 0;
+
+	tmp = (Cheat *)malloc(sizeof(Cheat) * count);
+	if (tmp == NULL)
+		return -1;
+
+	memcpy(tmp, &Cheats[first], sizeof(Cheat) * count);
+	memmove(&Cheats[count], &Cheats[0], sizeof(Cheat) * first);
+	memcpy(&Cheats[0], tmp, sizeof(Cheat) * count);
+	free(tmp);
+	return 0;
+}
+
+// drop everything from 'first' on and shrink the code list to match
+void RemoveCheatsFrom(int first) {
+	int i, end = 0;
+
+	if (first < 0)
+		first = 0;
+	if (first >= NumCheats)
+		return;
+
+	for (i = first; i < NumCheats; i++)
+		free(Cheats[i].Descr);
+
+	NumCheats = first;
+
+	// the survivors are not necessarily packed at the front of the code
+	// array (MoveCheatsToFront reorders records, not codes), so take the
+	// high water mark instead of assuming the last record ends the list
+	for (i = 0; i < NumCheats; i++)
+		if (Cheats[i].First + Cheats[i].n > end)
+			end = Cheats[i].First + Cheats[i].n;
+
+	NumCodes = end;
 }
 
 // load cheats from the specific filename

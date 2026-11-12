@@ -51,6 +51,7 @@
 
 #include <libretro.h>
 #include "libretro_core_options.h"
+#include "libretro_cheats.h"
 
 #ifdef USE_LIBRETRO_VFS
 #include <streams/file_stream_transforms.h>
@@ -212,7 +213,13 @@ static bool axis_bounds_modifier;
 
 //Dummy functions
 bool retro_load_game_special(unsigned game_type, const struct retro_game_info *info, size_t num_info) { return false; }
-void retro_unload_game(void) {}
+void retro_unload_game(void)
+{
+   cheat_db_free();
+   /* drop the previous game's cheat entries from the menu, otherwise they
+      stay listed until the next game happens to have cheats too */
+   libretro_set_cheat_core_options(environ_cb, NULL, 0);
+}
 static int vout_open(void) { return 0; }
 static void vout_close(void) {}
 static int snd_init(void) { return 0; }
@@ -1367,13 +1374,29 @@ bool retro_unserialize(const void *data, size_t size)
 /* cheats */
 void retro_cheat_reset(void)
 {
-   ClearAllCheats();
+   /* keep the built-in block at the head, it is driven by core options.
+      Everything behind it goes, a cheatpops.db the user loaded included */
+   if (g_cheat_db.embedded_count > 0 &&
+       NumCheats >= g_cheat_db.embedded_count)
+   {
+      RemoveCheatsFrom(g_cheat_db.embedded_count);
+      g_cheat_db.external_base = g_cheat_db.embedded_count;
+   }
+   else
+   {
+      ClearAllCheats();
+      g_cheat_db.embedded_count = 0;
+      g_cheat_db.external_base = 0;
+   }
 }
 
 void retro_cheat_set(unsigned index, bool enabled, const char *code)
 {
    int ret = -1;
    char *buf;
+
+   /* the frontend numbers its own cheats from zero, ours sit in front */
+   index += g_cheat_db.external_base;
 
    // cheat funcs are destructive, need a copy...
    buf = strdup(code);
@@ -1401,8 +1424,11 @@ void retro_cheat_set(unsigned index, bool enabled, const char *code)
 
    if (index < NumCheats)
       ret = EditCheat(index, "", buf);
-   else
-      ret = AddCheat("", buf);
+   else if (AddCheat("", buf) == 0)
+   {
+      index = NumCheats - 1;
+      ret = 0;
+   }
 
 finish:
    if (ret != 0)
@@ -2171,7 +2197,12 @@ bool retro_load_game(const struct retro_game_info *info)
    {
       Config.PsxRegion = PSX_REGION_US;
       Config.PsxType = PSX_TYPE_NTSC;
+      /* don't let the cheat lookup inherit the previous disc's id */
+      CdromId[0] = '\0';
    }
+
+   /* Init embedded cheat database for this game */
+   cheat_db_init(CdromId);
 
    load_memcards();
    plugin_call_rearmed_cbs();
@@ -2187,6 +2218,18 @@ bool retro_load_game(const struct retro_game_info *info)
       return false;
    }
    emu_on_new_cd(0);
+
+   /* Load embedded cheats and register as core options */
+   cheat_db_load();
+   {
+      size_t cheat_count = 0;
+      struct retro_core_option_v2_definition *cheat_defs =
+         cheat_db_get_option_defs(&cheat_count);
+      /* register even with an empty list, otherwise the previous game's
+         cheat options stay visible */
+      libretro_set_cheat_core_options(environ_cb, cheat_defs, cheat_count);
+      cheat_db_update(environ_cb);
+   }
 
    set_retro_memmap();
    retro_set_audio_buff_status_cb();
@@ -3560,8 +3603,10 @@ void retro_run(void)
    update_input();
 
    bool updated = false;
-   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated) {
       update_variables(true);
+      cheat_db_update(environ_cb);
+   }
 
    psxRegs.stop = 0;
    psxCpu->Execute(&psxRegs);
@@ -4008,6 +4053,8 @@ void retro_init(void)
 void retro_deinit(void)
 {
    size_t i;
+
+   cheat_db_free();
 
    if (plugins_opened)
    {

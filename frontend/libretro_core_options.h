@@ -52,6 +52,11 @@ extern "C" {
 
 struct retro_core_option_v2_category option_cats_us[] = {
    {
+      "cheat",
+      "Cheats",
+      "Game-specific cheat codes. Changes take effect after saving."
+   },
+   {
       "system",
       "System",
       "Configure base hardware parameters: region, BIOS selection, memory cards, etc."
@@ -1868,6 +1873,46 @@ struct retro_core_options_v2 *options_intl[RETRO_LANGUAGE_LAST] = {
  ********************************
 */
 
+/**
+ * Return a category list without the "cheat" entry when the current game has
+ * no cheats. A declared-but-empty category still shows up in the frontend as
+ * an empty submenu, so it has to disappear entirely.
+ *
+ * When keep is true, or the copy cannot be allocated, the input pointer is
+ * returned and *owned stays false; the caller must only free the result when
+ * *owned is true.
+ */
+static INLINE struct retro_core_option_v2_category *
+filter_cheat_category(struct retro_core_option_v2_category *cats, bool keep,
+      bool *owned)
+{
+   size_t i, n = 0;
+   struct retro_core_option_v2_category *out;
+
+   *owned = false;
+
+   if (!cats || keep)
+      return cats;
+
+   while (cats[n].key)
+      n++;
+
+   out = (struct retro_core_option_v2_category *)
+      calloc(n + 1, sizeof(struct retro_core_option_v2_category));
+   if (!out)
+      return cats; /* an empty entry beats losing every option */
+
+   n = 0;
+   for (i = 0; cats[i].key; i++) {
+      if (strcmp(cats[i].key, "cheat") == 0)
+         continue;
+      out[n++] = cats[i];
+   }
+
+   *owned = true;
+   return out;
+}
+
 /* Handles configuration/setting of core options.
  * Should be called as early as possible - ideally inside
  * retro_set_environment(), and no later than retro_load_game()
@@ -1894,21 +1939,44 @@ static INLINE void libretro_set_core_options(retro_environment_t environ_cb,
 
    if (version >= 2)
    {
+      /* No game is loaded yet, so there are no cheat options: leave the
+       * cheat category out, otherwise the frontend shows an empty submenu
+       * right from startup. retro_load_game() re-registers with it. */
+      bool own_us = false, own_local = false;
+      struct retro_core_options_v2 opts_us = options_us;
+
+      opts_us.categories = filter_cheat_category(options_us.categories, false, &own_us);
 #ifndef HAVE_NO_LANGEXTRA
       struct retro_core_options_v2_intl core_options_intl;
+      struct retro_core_options_v2 opts_local;
 
-      core_options_intl.us    = &options_us;
+      core_options_intl.us    = &opts_us;
       core_options_intl.local = NULL;
 
       if (environ_cb(RETRO_ENVIRONMENT_GET_LANGUAGE, &language) &&
-          (language < RETRO_LANGUAGE_LAST) && (language != RETRO_LANGUAGE_ENGLISH))
-         core_options_intl.local = options_intl[language];
+          (language < RETRO_LANGUAGE_LAST) && (language != RETRO_LANGUAGE_ENGLISH) &&
+          options_intl[language])
+      {
+         opts_local = *options_intl[language];
+         opts_local.categories = filter_cheat_category(opts_local.categories,
+               false, &own_local);
+         core_options_intl.local = &opts_local;
+      }
 
       *categories_supported = environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL,
             &core_options_intl);
 #else
       *categories_supported = environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2,
-            &options_us);
+            &opts_us);
+#endif
+
+      if (own_us)
+         free(opts_us.categories);
+#ifdef HAVE_NO_LANGEXTRA
+      (void)own_local;
+#else
+      if (own_local)
+         free(opts_local.categories);
 #endif
    }
    else
@@ -2148,6 +2216,133 @@ error:
          variables = NULL;
       }
    }
+}
+
+/**
+ * Register merged core options: static options + cheat options.
+ * Preserves translations by using SET_CORE_OPTIONS_V2_INTL.
+ * Returns true on success.
+ */
+static INLINE bool libretro_set_cheat_core_options(
+      retro_environment_t environ_cb,
+      struct retro_core_option_v2_definition *cheat_defs,
+      size_t cheat_count)
+{
+   unsigned version = 0;
+#ifndef HAVE_NO_LANGEXTRA
+   unsigned language = 0;
+#endif
+   if (!environ_cb)
+      return false;
+
+   if (!environ_cb(RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION, &version))
+      version = 0;
+
+   if (version >= 2) {
+      size_t i;
+      size_t static_count = 0;
+      /* a NULL array with a non-zero count would be copied from nowhere */
+      bool has_cheats = cheat_defs != NULL && cheat_count > 0;
+      if (!has_cheats)
+         cheat_count = 0;
+      while (option_defs_us[static_count].key)
+         static_count++;
+
+      size_t total = static_count + cheat_count;
+
+      /* Build base (English) merged definitions:
+       * cheat options prepended at front so they appear first */
+      struct retro_core_option_v2_definition *merged_us =
+         (struct retro_core_option_v2_definition *)
+         calloc(total + 1, sizeof(struct retro_core_option_v2_definition));
+      if (!merged_us)
+         return false;
+
+      for (i = 0; i < cheat_count; i++)
+         merged_us[i] = cheat_defs[i];
+      for (i = 0; i < static_count; i++)
+         merged_us[cheat_count + i] = option_defs_us[i];
+
+      bool own_us = false, own_local = false;
+      struct retro_core_option_v2_category *cats_us =
+         filter_cheat_category(option_cats_us, has_cheats, &own_us);
+
+      /* Build translated definitions if language is set. Without the
+       * translation tables there is nothing to look up, and options_intl
+       * does not even exist in that build. */
+      struct retro_core_options_v2 merged_options_us = { cats_us, merged_us };
+      struct retro_core_options_v2 *merged_local = NULL;
+      struct retro_core_option_v2_definition *merged_defs_local = NULL;
+      struct retro_core_option_v2_category *cats_local = NULL;
+
+#ifndef HAVE_NO_LANGEXTRA
+      if (environ_cb(RETRO_ENVIRONMENT_GET_LANGUAGE, &language) &&
+          language < RETRO_LANGUAGE_LAST && language != RETRO_LANGUAGE_ENGLISH) {
+         struct retro_core_options_v2 *opts_local = options_intl[language];
+         if (opts_local && opts_local->definitions) {
+            merged_defs_local =
+               (struct retro_core_option_v2_definition *)
+               calloc(total + 1, sizeof(struct retro_core_option_v2_definition));
+            if (merged_defs_local) {
+               size_t local_count = 0;
+               while (opts_local->definitions[local_count].key)
+                  local_count++;
+
+               /* Cheat options prepended at front. Their names come from the
+                * cheat database, so only the on/off labels are localized
+                * here: the frontend only rewrites the raw "enabled" /
+                * "disabled" strings to ON/OFF when it can match them against
+                * its own (already translated) ON/OFF text. */
+               for (i = 0; i < cheat_count; i++) {
+                  merged_defs_local[i] = cheat_defs[i];
+                  if (language == RETRO_LANGUAGE_CHINESE_SIMPLIFIED) {
+                     merged_defs_local[i].values[0].label = "关闭";
+                     merged_defs_local[i].values[1].label = "开启";
+                  }
+               }
+
+               /* Static options are matched by key, the translated table
+                * may lag behind the English one */
+               for (i = 0; i < static_count; i++) {
+                  size_t j;
+                  merged_defs_local[cheat_count + i] = option_defs_us[i];
+                  for (j = 0; j < local_count; j++) {
+                     if (strcmp(opts_local->definitions[j].key,
+                                option_defs_us[i].key) == 0) {
+                        merged_defs_local[cheat_count + i] = opts_local->definitions[j];
+                        break;
+                     }
+                  }
+               }
+               /* Use translated categories if available, otherwise English,
+                * dropping the cheat entry when this game has none */
+               cats_local = filter_cheat_category(
+                  opts_local->categories ? opts_local->categories : option_cats_us,
+                  has_cheats, &own_local);
+               merged_local = (struct retro_core_options_v2 *)
+                  calloc(1, sizeof(struct retro_core_options_v2));
+               if (merged_local) {
+                  merged_local->categories = cats_local;
+                  merged_local->definitions = merged_defs_local;
+               }
+            }
+         }
+      }
+#endif /* !HAVE_NO_LANGEXTRA */
+
+      struct retro_core_options_v2_intl intl_options = { &merged_options_us, merged_local };
+      bool ret = environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL, &intl_options);
+
+      free(merged_us);
+      free(merged_defs_local);
+      free(merged_local);
+      if (own_us)
+         free(cats_us);
+      if (own_local)
+         free(cats_local);
+      return ret;
+   }
+   return false;
 }
 
 #ifdef __cplusplus

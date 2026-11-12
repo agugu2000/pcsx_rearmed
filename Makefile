@@ -454,6 +454,7 @@ OBJS += deps/libretro-common/time/rtime.o
 CFLAGS += -DUSE_LIBRETRO_VFS
 endif
 OBJS += frontend/libretro.o
+OBJS += frontend/libretro_cheats.o
 CFLAGS += -DHAVE_LIBRETRO
 INC_LIBRETRO_COMMON := 1
 
@@ -537,7 +538,7 @@ else
 endif
 
 clean: $(PLAT_CLEAN) clean_plugins
-	$(RM) $(TARGET) *.o $(OBJS) $(OBJS:.o=.d) $(TARGET).map include/revision.h
+	$(RM) $(TARGET) *.o $(OBJS) $(OBJS:.o=.d) $(TARGET).map include/revision.h $(CHEAT_DB_C)
 
 ifeq ($(STATIC_LINKING), 1)
 link_test: frontend/libretro-link-test.o $(TARGET)
@@ -650,3 +651,13 @@ rel: pcsx $(PLUGINS) \
 	mkdir out/pcsx_rearmed/bios/
 	cd out && zip -9 -r ../pcsx_rearmed_$(VER)_caanoo.zip *
 endif
+
+# embedded cheat database, built from the bilingual pack
+PYTHON     ?= python3
+CHEAT_JSON := deps/cheat_bilingual.json
+CHEAT_DB_C := frontend/cheat_db.c
+
+$(CHEAT_DB_C): tools/gen_cheat_db.py $(CHEAT_JSON)
+	$(PYTHON) tools/gen_cheat_db.py $(CHEAT_JSON) $@
+
+frontend/libretro_cheats.o: $(CHEAT_DB_C)
