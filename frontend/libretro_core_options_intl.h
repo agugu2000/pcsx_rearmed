@@ -142,7 +142,7 @@ struct retro_core_option_v2_definition option_defs_chs[] = {
       "pcsx_rearmed_bios",
       "BIOS 选择",
       NULL,
-      "指定使用的 BIOS。「自动」会尝试从前端的 system 目录加载真实 BIOS 文件，找不到时回退到高级模拟（HLE）；「HLE」强制使用高级 BIOS 模拟。建议使用官方 BIOS 文件以获得更好的兼容性。",
+      "指定使用的 BIOS。「自动」会尝试从前端的 system 目录加载真实 BIOS 文件，找不到时回退到高级模拟（HLE）；「HLE」强制使用高级 BIOS 模拟。system 目录中找到的 BIOS 文件也会列出并可直接选择，此时无论游戏区域如何都会使用该文件。建议使用官方 BIOS 文件以获得更好的兼容性。",
       NULL,
       "system",
       {
@@ -1882,11 +1882,12 @@ struct retro_core_option_v2_definition option_defs_tr[] = {
       "pcsx_rearmed_bios",
       "BIOS Kullan",
       NULL,
-      "Gerçek bios dosyasını (varsa) veya öykünmüş bios'u (HLE) kullanmanızı sağlar. Daha iyi uyumluluk için resmi bios dosyasını kullanmanız önerilir.",
+      "Use edilecek BIOS'u belirtin. 'Otomatik', ön yüzün 'system' dizininden gerçek bir BIOS dosyası yüklemeyi dener; bulunamazsa üst düzey öykünmeye (HLE) geri döner. 'HLE', üst düzey BIOS öykünmesini zorlar. 'system' dizininde bulunan BIOS dosyaları da listelenir ve doğrudan seçilebilir; bu durumda dosya, oyunun bölgesine bakılmaksızın kullanılır. Daha iyi uyumluluk için resmi bir BIOS dosyası kullanmanız önerilir.",
       NULL,
       NULL,
       {
          { "auto", "otomatik" },
+         { "HLE",  NULL },
          { NULL, NULL },
       },
       "auto",

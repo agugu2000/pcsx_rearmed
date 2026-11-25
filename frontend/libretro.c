@@ -3868,52 +3868,81 @@ static struct {
 } bios_list;
 static char bios_selected[sizeof(Config.Bios[0])];
 
-static struct retro_core_option_value *bios_option_values(size_t *fixed_count)
-{
-   static struct retro_core_option_value *values;
-   static size_t fixed;
-   size_t i;
+/* The discovered BIOS files must be appended to every language table we
+ * expose, otherwise translated options would not list them. */
+static struct {
+   struct retro_core_option_value *values;
+   size_t fixed;
+} bios_value_sets[RETRO_LANGUAGE_LAST];
+static size_t bios_value_sets_count;
 
-   if (values == NULL) {
-      for (i = 0; option_defs_us[i].key; i++) {
-         if (!strcmp(option_defs_us[i].key, "pcsx_rearmed_bios")) {
-            values = option_defs_us[i].values;
+static void bios_value_sets_init(void)
+{
+   struct retro_core_option_v2_definition *defs[RETRO_LANGUAGE_LAST];
+   size_t i, d, count = 0;
+
+   if (bios_value_sets_count)
+      return;
+
+#ifndef HAVE_NO_LANGEXTRA
+   for (i = 0; i < RETRO_LANGUAGE_LAST; i++) {
+      if (options_intl[i] && options_intl[i]->definitions)
+         defs[count++] = options_intl[i]->definitions;
+   }
+#else
+   defs[count++] = option_defs_us;
+#endif
+
+   for (d = 0; d < count; d++) {
+      for (i = 0; defs[d][i].key; i++) {
+         if (!strcmp(defs[d][i].key, "pcsx_rearmed_bios")) {
+            struct retro_core_option_value *values = defs[d][i].values;
+            size_t fixed = 0;
+
+            /* the static values ("auto", "HLE"), the list is appended after them */
+            while (values[fixed].value)
+               fixed++;
+            bios_value_sets[bios_value_sets_count].values = values;
+            bios_value_sets[bios_value_sets_count].fixed = fixed;
+            bios_value_sets_count++;
             break;
          }
       }
-      if (values == NULL)
-         return NULL;
-      // the static values ("auto", "HLE"), the list is appended after them
-      while (values[fixed].value)
-         fixed++;
    }
-   *fixed_count = fixed;
-   return values;
 }
 
 static size_t bios_list_capacity(void)
 {
-   size_t fixed = 0;
-   if (!bios_option_values(&fixed))
-      return 0;
-   // keep a { NULL, NULL } terminator
-   return RETRO_NUM_CORE_OPTION_VALUES_MAX - 1 - fixed;
+   size_t capacity = RETRO_NUM_CORE_OPTION_VALUES_MAX;
+   size_t s;
+
+   bios_value_sets_init();
+   for (s = 0; s < bios_value_sets_count; s++) {
+      /* keep a { NULL, NULL } terminator */
+      size_t avail = RETRO_NUM_CORE_OPTION_VALUES_MAX - 1 - bios_value_sets[s].fixed;
+      if (avail < capacity)
+         capacity = avail;
+   }
+   return capacity;
 }
 
 static void bios_list_publish(void)
 {
-   struct retro_core_option_value *values;
-   size_t i, fixed = 0;
+   size_t s;
 
-   values = bios_option_values(&fixed);
-   if (values == NULL)
-      return;
-   for (i = 0; i < bios_list.count; i++) {
-      values[fixed + i].value = bios_list.e[i].name;
-      values[fixed + i].label = bios_list.e[i].label;
+   bios_value_sets_init();
+   for (s = 0; s < bios_value_sets_count; s++) {
+      struct retro_core_option_value *values = bios_value_sets[s].values;
+      size_t fixed = bios_value_sets[s].fixed;
+      size_t i;
+
+      for (i = 0; i < bios_list.count; i++) {
+         values[fixed + i].value = bios_list.e[i].name;
+         values[fixed + i].label = bios_list.e[i].label;
+      }
+      values[fixed + i].value = NULL;
+      values[fixed + i].label = NULL;
    }
-   values[fixed + i].value = NULL;
-   values[fixed + i].label = NULL;
 }
 
 static void bios_list_free(void)
