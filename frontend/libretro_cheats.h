@@ -31,8 +31,9 @@ typedef struct {
   int   *cheat_map;      /* option index -> Cheats[] index, -1 when rejected */
 
   /* Raw data for applying cheats */
-  char   **names;        /* cheat names, Chinese: the option label */
+  char   **names_chs;    /* simplified names, the label for zh-Hans */
   char   **names_en;     /* original names, English: the option sublabel */
+  char   **names_cht;    /* traditional names, the label for zh-Hant */
   int      n_cheats;
   int      n_codes;
   int     *cheat_first_code;  /* first code index for each cheat */
@@ -63,7 +64,7 @@ void cheat_db_free(void);
  * @return Array of retro_core_option_v2_definition, or NULL
  */
 struct retro_core_option_v2_definition *
-cheat_db_get_option_defs(size_t *count);
+cheat_db_get_option_defs(retro_environment_t cb, size_t *count);
 
 /**
  * Add all cheats for the current game into the PCSX cheat engine.

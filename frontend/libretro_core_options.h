@@ -1857,7 +1857,7 @@ struct retro_core_options_v2 *options_intl[RETRO_LANGUAGE_LAST] = {
    NULL,        /* RETRO_LANGUAGE_PORTUGUESE_PORTUGAL */
    NULL,        /* RETRO_LANGUAGE_RUSSIAN */
    NULL,        /* RETRO_LANGUAGE_KOREAN */
-   NULL,        /* RETRO_LANGUAGE_CHINESE_TRADITIONAL */
+   &options_cht, /* RETRO_LANGUAGE_CHINESE_TRADITIONAL */
    &options_chs, /* RETRO_LANGUAGE_CHINESE_SIMPLIFIED */
    NULL,        /* RETRO_LANGUAGE_ESPERANTO */
    NULL,        /* RETRO_LANGUAGE_POLISH */
@@ -2299,6 +2299,9 @@ static INLINE bool libretro_set_cheat_core_options(
                   if (language == RETRO_LANGUAGE_CHINESE_SIMPLIFIED) {
                      merged_defs_local[i].values[0].label = "关闭";
                      merged_defs_local[i].values[1].label = "开启";
+                  } else if (language == RETRO_LANGUAGE_CHINESE_TRADITIONAL) {
+                     merged_defs_local[i].values[0].label = "關閉";
+                     merged_defs_local[i].values[1].label = "開啟";
                   }
                }
 

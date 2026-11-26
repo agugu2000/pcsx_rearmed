@@ -10,7 +10,8 @@ Usage:
 
   {
     "SLUS01234.CHT": [
-      {"en_string": "Infinite health", "cn_string": "生命无限",
+      {"chs_string": "生命无限", "en_string": "Infinite health",
+       "cht_string": "生命無限",
        "code": "800856D2 000C\\n80136198 099F"},
       ...
     ],
@@ -260,16 +261,18 @@ def load_pack(path, warnings):
             where = '%s cheat %d' % (filename, idx)
             if not isinstance(entry, dict):
                 raise PackError('%s: not an object' % where)
-            missing = {'en_string', 'cn_string', 'code'} - set(entry)
-            extra = set(entry) - {'en_string', 'cn_string', 'code'}
+            want = {'chs_string', 'en_string', 'cht_string', 'code'}
+            missing = want - set(entry)
+            extra = set(entry) - want
             if missing:
                 raise PackError('%s: missing %s' % (where, sorted(missing)))
             if extra:
                 raise PackError('%s: unexpected field %s' % (where, sorted(extra)))
-            cn = check_name(entry['cn_string'], 'cn_string', where)
+            chs = check_name(entry['chs_string'], 'chs_string', where)
             en = check_name(entry['en_string'], 'en_string', where)
+            cht = check_name(entry['cht_string'], 'cht_string', where)
             codes = parse_codes(entry['code'], where, warnings)
-            rows.append((cn, en, codes))
+            rows.append((chs, en, cht, codes))
 
         if len(rows) > MAX_U16:
             raise PackError('%s: %d cheats, limit is %d'
@@ -300,8 +303,8 @@ def build_blob(games):
 
         body = bytearray()
         n_cheats = n_codes = 0
-        for cn, en, codes in games[game_id]:
-            for name in (cn, en):
+        for chs, en, cht, codes in games[game_id]:
+            for name in (chs, en, cht):
                 raw = name.encode('utf-8')
                 body += len(raw).to_bytes(2, 'little')
                 body += raw
@@ -434,11 +437,11 @@ def read_reference(path):
             pos += 2
             if cn_len == 0:
                 break
-            if pos + cn_len + 4 > len(blob):
+            if pos + cn_len + 2 > len(blob):
                 print('reference: %s name runs past the end at offset %d'
                       % (game_id, pos), file=sys.stderr)
                 sys.exit(1)
-            cn = blob[pos:pos + cn_len].decode('utf-8', 'replace')
+            chs = blob[pos:pos + cn_len].decode('utf-8', 'replace')
             pos += cn_len
             en_len = blob[pos] | (blob[pos + 1] << 8)
             pos += 2
@@ -446,7 +449,16 @@ def read_reference(path):
                 print('reference: %s second name runs past the end at offset %d'
                       % (game_id, pos), file=sys.stderr)
                 sys.exit(1)
+            en = blob[pos:pos + en_len].decode('utf-8', 'replace')
             pos += en_len
+            cht_len = blob[pos] | (blob[pos + 1] << 8)
+            pos += 2
+            if pos + cht_len + 2 > len(blob):
+                print('reference: %s third name runs past the end at offset %d'
+                      % (game_id, pos), file=sys.stderr)
+                sys.exit(1)
+            cht = blob[pos:pos + cht_len].decode('utf-8', 'replace')
+            pos += cht_len
             count = blob[pos] | (blob[pos + 1] << 8)
             pos += 2
             if pos + count * 6 > len(blob):
@@ -459,7 +471,7 @@ def read_reference(path):
                 value = int.from_bytes(blob[pos + 4:pos + 6], 'little')
                 pos += 6
                 codes.append((addr, value))
-            items.append((cn, codes))
+            items.append((chs, codes))
         games[game_id] = items
 
     return games
@@ -512,7 +524,7 @@ def check(source, reference, strict_coverage=False):
             print('%s: cheat count %d -> %d' % (game_id, len(old), len(new)))
             diffs += 1
             continue
-        for i, ((cn, en, new_codes), (old_name, old_codes)) in enumerate(zip(new, old)):
+        for i, ((chs, en, cht, new_codes), (old_name, old_codes)) in enumerate(zip(new, old)):
             if new_codes != old_codes:
                 print('%s[%d] "%s": codes differ' % (game_id, i, old_name))
                 diffs += 1
@@ -585,7 +597,7 @@ def main():
     changed = write_if_changed(output_path, text)
 
     cheats = sum(len(v) for v in games.values())
-    codes = sum(len(c) for v in games.values() for _, _, c in v)
+    codes = sum(len(c) for v in games.values() for _, _, _, c in v)
     print('%s: %d cheats, %d codes, %d games, %d bytes%s'
           % (output_path, cheats, codes, len(index), len(blob),
              '' if changed else ' (unchanged)'))

@@ -2365,7 +2365,7 @@ bool retro_load_game(const struct retro_game_info *info)
    {
       size_t cheat_count = 0;
       struct retro_core_option_v2_definition *cheat_defs =
-         cheat_db_get_option_defs(&cheat_count);
+         cheat_db_get_option_defs(environ_cb, &cheat_count);
       /* register even with an empty list, otherwise the previous game's
          cheat options stay visible */
       libretro_set_cheat_core_options(environ_cb, cheat_defs, cheat_count);

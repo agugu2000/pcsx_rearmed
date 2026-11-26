@@ -25,9 +25,9 @@ cheat_db_t g_cheat_db = {0};
 #error "frontend/cheat_db.c is stale - regenerate it with tools/gen_cheat_db.py"
 #endif
 
-/* One cheat is: cn name, en name, code count, codes. The Chinese name is
-   what the emulator's cheat list stores; the English one only ever reaches
-   the menu as the option sublabel, so both are read here. */
+/* One cheat is: chs name, en name, cht name, code count, codes. The
+   language tables pick one of the three names as the option label and
+   keep the English one as a sublabel, so all three are read here. */
 static int parse_cheats_for_game(const uint8_t *data, size_t data_len,
                                  int max_cheats, int max_codes)
 {
@@ -38,60 +38,50 @@ static int parse_cheats_for_game(const uint8_t *data, size_t data_len,
   g_cheat_db.n_codes = 0;
 
   while (p + 2 <= end) {
-    uint16_t name_len = p[0] | (p[1] << 8);
+    uint16_t len[3];
+    char *names[3] = { NULL, NULL, NULL };
+    int k;
+
+    len[0] = p[0] | (p[1] << 8);
     p += 2;
 
-    if (name_len == 0)
+    if (len[0] == 0)
       break; /* end of game marker */
-
-    if (p + name_len + 2 > end)
-      return -1;
 
     /* The generated counts should make these impossible; keep them as a
        guard against a hand-edited blob rather than a silent truncation. */
     if (g_cheat_db.n_cheats >= max_cheats)
       break;
 
-    /* Allocate name copy */
-    char *name = (char *)malloc(name_len + 1);
-    if (!name) return -1;
-    memcpy(name, p, name_len);
-    name[name_len] = '\0';
-    p += name_len;
-
-    uint16_t name_en_len = p[0] | (p[1] << 8);
-    p += 2;
-
-    if (p + name_en_len + 2 > end) {
-      free(name);
-      return -1;
+    for (k = 0; k < 3; k++) {
+      if (k > 0) {
+        len[k] = p[0] | (p[1] << 8);
+        p += 2;
+      }
+      if (p + len[k] + 2 > end)
+        goto bad;
+      names[k] = (char *)malloc(len[k] + 1);
+      if (!names[k])
+        goto bad;
+      memcpy(names[k], p, len[k]);
+      names[k][len[k]] = '\0';
+      p += len[k];
     }
-
-    char *name_en = (char *)malloc(name_en_len + 1);
-    if (!name_en) {
-      free(name);
-      return -1;
-    }
-    memcpy(name_en, p, name_en_len);
-    name_en[name_en_len] = '\0';
-    p += name_en_len;
 
     uint16_t code_count = p[0] | (p[1] << 8);
     p += 2;
 
     if (g_cheat_db.n_codes + code_count > max_codes) {
-      free(name);
-      free(name_en);
+      for (k = 0; k < 3; k++)
+        free(names[k]);
       break;
     }
-    if (p + code_count * 6 > end) {
-      free(name);
-      free(name_en);
-      return -1;
-    }
+    if (p + code_count * 6 > end)
+      goto bad;
 
-    g_cheat_db.names[g_cheat_db.n_cheats] = name;
-    g_cheat_db.names_en[g_cheat_db.n_cheats] = name_en;
+    g_cheat_db.names_chs[g_cheat_db.n_cheats] = names[0];
+    g_cheat_db.names_en[g_cheat_db.n_cheats] = names[1];
+    g_cheat_db.names_cht[g_cheat_db.n_cheats] = names[2];
     g_cheat_db.cheat_first_code[g_cheat_db.n_cheats] = g_cheat_db.n_codes;
     g_cheat_db.cheat_num_codes[g_cheat_db.n_cheats] = code_count;
 
@@ -106,6 +96,12 @@ static int parse_cheats_for_game(const uint8_t *data, size_t data_len,
     }
 
     g_cheat_db.n_cheats++;
+    continue;
+
+bad:
+    for (k = 0; k < 3; k++)
+      free(names[k]);
+    return -1;
   }
 
   return 0;
@@ -173,15 +169,16 @@ int cheat_db_init(const char *cdrom_id)
 
   memset(&g_cheat_db, 0, sizeof(g_cheat_db));
   snprintf(g_cheat_db.game_id, sizeof(g_cheat_db.game_id), "%s", gid);
-  g_cheat_db.names            = (char **)calloc(n_cheats, sizeof(char *));
+  g_cheat_db.names_chs        = (char **)calloc(n_cheats, sizeof(char *));
   g_cheat_db.names_en         = (char **)calloc(n_cheats, sizeof(char *));
+  g_cheat_db.names_cht        = (char **)calloc(n_cheats, sizeof(char *));
   g_cheat_db.cheat_first_code = (int *)calloc(n_cheats, sizeof(int));
   g_cheat_db.cheat_num_codes  = (int *)calloc(n_cheats, sizeof(int));
   g_cheat_db.code_addrs       = (uint32_t *)calloc(n_codes, sizeof(uint32_t));
   g_cheat_db.code_values      = (uint16_t *)calloc(n_codes, sizeof(uint16_t));
   g_cheat_db.cheat_map        = (int *)calloc(n_cheats, sizeof(int));
 
-  if (!g_cheat_db.names || !g_cheat_db.names_en ||
+  if (!g_cheat_db.names_chs || !g_cheat_db.names_en || !g_cheat_db.names_cht ||
       !g_cheat_db.cheat_first_code ||
       !g_cheat_db.cheat_num_codes || !g_cheat_db.code_addrs ||
       !g_cheat_db.code_values || !g_cheat_db.cheat_map) {
@@ -198,15 +195,20 @@ int cheat_db_init(const char *cdrom_id)
 
 void cheat_db_free(void)
 {
-  if (g_cheat_db.names) {
+  if (g_cheat_db.names_chs) {
     for (int i = 0; i < g_cheat_db.n_cheats; i++)
-      free(g_cheat_db.names[i]);
-    free(g_cheat_db.names);
+      free(g_cheat_db.names_chs[i]);
+    free(g_cheat_db.names_chs);
   }
   if (g_cheat_db.names_en) {
     for (int i = 0; i < g_cheat_db.n_cheats; i++)
       free(g_cheat_db.names_en[i]);
     free(g_cheat_db.names_en);
+  }
+  if (g_cheat_db.names_cht) {
+    for (int i = 0; i < g_cheat_db.n_cheats; i++)
+      free(g_cheat_db.names_cht[i]);
+    free(g_cheat_db.names_cht);
   }
   /* the option keys were allocated one by one */
   if (g_cheat_db.option_defs) {
@@ -223,7 +225,7 @@ void cheat_db_free(void)
 }
 
 static struct retro_core_option_v2_definition *
-build_option_defs(void)
+build_option_defs(retro_environment_t cb)
 {
   size_t n = g_cheat_db.n_cheats;
   if (n == 0) return NULL;
@@ -251,21 +253,26 @@ build_option_defs(void)
     snprintf(key, 64, "pcsx_rearmed_cheat_%s_%zu", g_cheat_db.game_id, i);
     opt->key = key;
 
-    /* Chinese name is the option label - the big line, which the menu
+    /* Chinese names are the option label - the big line, which the menu
        scrolls when it does not fit. The English name goes to the sublabel
        underneath: smaller, dimmer, word-wrapped, never scrolled away.
+       Both at once is deliberate: a translated pack is easy to get subtly
+       wrong, and the original lets a player check what a cheat really does.
 
-       Both at once is deliberate. A translated pack is easy to get subtly
-       wrong, and having the original on screen lets a player see what a
-       cheat really does instead of trusting a single line of Chinese.
-
-       Proper nouns and unit labels ("HP 9999", "Gran Turismo") are spelled
-       the same in both, so they get no sublabel rather than the same text
-       twice. */
-    opt->desc = g_cheat_db.names[i];
+       Only zh-Hans and zh-Hant get a translated label; every other language
+       uses the English one. Proper nouns spelled alike in both languages get
+       no sublabel rather than the same text twice. */
+    unsigned language = RETRO_LANGUAGE_ENGLISH;
+    if (cb && cb(RETRO_ENVIRONMENT_GET_LANGUAGE, &language) &&
+        language >= RETRO_LANGUAGE_LAST)
+        language = RETRO_LANGUAGE_ENGLISH;
+    opt->desc = language == RETRO_LANGUAGE_CHINESE_TRADITIONAL ? g_cheat_db.names_cht[i]
+              : language == RETRO_LANGUAGE_CHINESE_SIMPLIFIED ? g_cheat_db.names_chs[i]
+              : g_cheat_db.names_en[i];
     opt->desc_categorized = NULL;
-    opt->info = (strcmp(opt->desc, g_cheat_db.names_en[i]) != 0)
-                  ? g_cheat_db.names_en[i] : NULL;
+    opt->info = (language == RETRO_LANGUAGE_ENGLISH ||
+                 strcmp(opt->desc, g_cheat_db.names_en[i]) == 0)
+                  ? NULL : g_cheat_db.names_en[i];
     opt->info_categorized = NULL;
     opt->category_key = "cheat";
 
@@ -290,7 +297,7 @@ build_option_defs(void)
 }
 
 struct retro_core_option_v2_definition *
-cheat_db_get_option_defs(size_t *count)
+cheat_db_get_option_defs(retro_environment_t cb, size_t *count)
 {
   if (!count)
     return NULL;
@@ -301,7 +308,7 @@ cheat_db_get_option_defs(size_t *count)
     return NULL;
 
   if (!g_cheat_db.option_defs) {
-    g_cheat_db.option_defs = build_option_defs();
+    g_cheat_db.option_defs = build_option_defs(cb);
     /* the caller copies *count entries out of the returned array, so a
        failed allocation has to report zero as well - NULL with a non-zero
        count would be dereferenced right away */
@@ -364,7 +371,7 @@ void cheat_db_load(void)
     if (code) {
       /* AddCheat drops entries whose code lines it cannot use and only
          bumps NumCheats on success, so the slot is only known afterwards */
-      if (AddCheat(g_cheat_db.names[i], code) == 0)
+      if (AddCheat(g_cheat_db.names_chs[i], code) == 0)
         g_cheat_db.cheat_map[i] = ok++;
       free(code);
     }
