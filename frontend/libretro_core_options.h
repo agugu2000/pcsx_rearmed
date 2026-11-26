@@ -1864,7 +1864,7 @@ struct retro_core_options_v2 *options_intl[RETRO_LANGUAGE_LAST] = {
    NULL,        /* RETRO_LANGUAGE_VIETNAMESE */
    NULL,        /* RETRO_LANGUAGE_ARABIC */
    NULL,        /* RETRO_LANGUAGE_GREEK */
-   &options_tr, /* RETRO_LANGUAGE_TURKISH */
+   NULL,        /* RETRO_LANGUAGE_TURKISH */
 };
 #endif
 
