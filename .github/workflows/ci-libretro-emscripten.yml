@@ -1,5 +1,5 @@
 name: CI (libretro-emscripten)
-on: [push, pull_request]
+on: [pull_request]
 jobs:
   build-libretro-emscripten:
     runs-on: "ubuntu-latest"

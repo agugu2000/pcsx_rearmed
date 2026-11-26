@@ -1,5 +1,5 @@
 name: CI (Linux)
-on: [push, pull_request]
+on: [pull_request]
 jobs:
   build-linux:
     name: build-linux (${{ matrix.arch }})
