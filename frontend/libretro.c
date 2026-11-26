@@ -1486,6 +1486,15 @@ static struct disks_state
 /* info->path of the running game, kept for per-game BIOS lookup */
 static char game_image_path[PATH_MAX];
 
+enum bios_mode {
+   BIOS_MODE_AUTO,
+   BIOS_MODE_HLE,
+   BIOS_MODE_FILE,
+};
+
+static enum bios_mode get_bios_config(void);
+static void prepare_bios(enum bios_mode mode);
+
 static void get_disk_label(char *disk_label, const char *disk_path, size_t len)
 {
    const char *base = NULL;
@@ -1626,9 +1635,8 @@ static bool find_per_game_bios(const char *image)
    return false;
 }
 
-/* m3u/image name first, then the current disc, then the first one.
-   Called on load and on disc switch; an ejected disc keeps the current
-   BIOS, a new path only kicks in on reset. */
+/* in auto mode only: m3u name for a group, else the current disc.
+   A new path only kicks in on reset. */
 static void update_per_game_bios(void)
 {
    const char *candidates[3];
@@ -1636,7 +1644,13 @@ static void update_per_game_bios(void)
 
    Config.GameBiosPath[0] = '\0';
 
-   if (game_image_path[0])
+   /* only auto mode consults per-game BIOS files */
+   if (get_bios_config() != BIOS_MODE_AUTO)
+      return;
+
+   /* a lone image is its own first disk; only m3u names a group */
+   if (game_image_path[0] && (disk_count == 0 || disks[0].fname == NULL ||
+       strcmp(game_image_path, disks[0].fname) != 0))
       candidates[count++] = game_image_path;
    if (disk_current_index < disk_count)
       candidates[count++] = disks[disk_current_index].fname;
@@ -3660,15 +3674,6 @@ static void print_internal_fps(void)
    }
 }
 
-enum bios_mode {
-   BIOS_MODE_AUTO,
-   BIOS_MODE_HLE,
-   BIOS_MODE_FILE,
-};
-
-static enum bios_mode get_bios_config(void);
-static void prepare_bios(enum bios_mode mode);
-
 void retro_run(void)
 {
    //SysReset must be run while core is running,Not in menu (Locks up Retroarch)
@@ -3676,6 +3681,7 @@ void retro_run(void)
    {
       reset_pending = false;
       prepare_bios(get_bios_config());
+      update_per_game_bios();
       SysReset();
       if (CheckResetManualExe())
          ;
@@ -4250,6 +4256,10 @@ static void prepare_bios(enum bios_mode mode)
    size_t i, count = ARRAY_SIZE(bios_auto_by_region);
    const char *name;
    assert(count == ARRAY_SIZE(Config.Bios));
+
+   if (mode != BIOS_MODE_AUTO)
+      Config.GameBiosPath[0] = '\0';
+
    for (i = 0; i < count; i++) {
       Config.Bios[i][0] = 0;
       if (mode == BIOS_MODE_HLE)

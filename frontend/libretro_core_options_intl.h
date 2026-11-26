@@ -142,7 +142,7 @@ struct retro_core_option_v2_definition option_defs_chs[] = {
       "pcsx_rearmed_bios",
       "BIOS 选择",
       NULL,
-      "指定使用的 BIOS。「自动」会尝试从前端的 system 目录加载真实 BIOS 文件，找不到时回退到高级模拟（HLE）；「HLE」强制使用高级 BIOS 模拟。system 目录中找到的 BIOS 文件也会列出并可直接选择，此时无论游戏区域如何都会使用该文件。建议使用官方 BIOS 文件以获得更好的兼容性。",
+      "指定使用的 BIOS。「自动」模式下，核心会先在游戏所在目录查找专属游戏 BIOS（规则：Game.m3u 或 Game.pbp 会找 Game.bios，Disc.cue 或 Disc.iso 会找 Disc.bios）；找不到时才从前端的 system 目录加载真实 BIOS 文件，仍找不到则回退到高级模拟（HLE）。「HLE」强制使用高级 BIOS 模拟，并忽略基于专属游戏文件名的 BIOS。system 目录中找到的 BIOS 文件也会列出并可直接选择，此时无论游戏区域如何都会使用该文件，且忽略基于专属游戏文件名的 BIOS。建议使用官方 BIOS 文件以获得更好的兼容性。",
       NULL,
       "system",
       {
