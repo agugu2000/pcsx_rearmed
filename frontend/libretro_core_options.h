@@ -2290,20 +2290,12 @@ static INLINE bool libretro_set_cheat_core_options(
                   local_count++;
 
                /* Cheat options prepended at front. Their names come from the
-                * cheat database, so only the on/off labels are localized
-                * here: the frontend only rewrites the raw "enabled" /
-                * "disabled" strings to ON/OFF when it can match them against
-                * its own (already translated) ON/OFF text. */
-               for (i = 0; i < cheat_count; i++) {
+                * cheat database. Leave the on/off value labels NULL: the
+                * frontend maps the raw "enabled" / "disabled" values onto its
+                * own translated ON/OFF text and only makes the option a
+                * toggle while the labels are still unset. */
+               for (i = 0; i < cheat_count; i++)
                   merged_defs_local[i] = cheat_defs[i];
-                  if (language == RETRO_LANGUAGE_CHINESE_SIMPLIFIED) {
-                     merged_defs_local[i].values[0].label = "关闭";
-                     merged_defs_local[i].values[1].label = "开启";
-                  } else if (language == RETRO_LANGUAGE_CHINESE_TRADITIONAL) {
-                     merged_defs_local[i].values[0].label = "關閉";
-                     merged_defs_local[i].values[1].label = "開啟";
-                  }
-               }
 
                /* Static options are matched by key, the translated table
                 * may lag behind the English one */
